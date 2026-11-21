@@ -811,6 +811,151 @@ def _extract_bare_inline_math(text: str, register_math) -> str:
     return "\n".join(out_lines)
 
 
+_UNICODE_DASHES_RE = re.compile(r"[–—−─━═]+")
+_SEP_ROW_RE = re.compile(r"^[\s|:–—−─━═-]+$")
+_INVISIBLE_ZW_RE = re.compile(r"[\u200b\u200c\u200d\ufeff]")
+_NBSP_RE = re.compile(r"[\u00a0\u202f\u2007]")
+
+
+def _split_table_cells(line: str) -> list[str]:
+    """Split a Markdown pipe-table row into stripped cells (respecting escaped \\|)."""
+    s = line.strip()
+    if s.startswith("|"):
+        s = s[1:]
+    if s.endswith("|") and not s.endswith(r"\|"):
+        s = s[:-1]
+    return [c.strip() for c in re.split(r"(?<!\\)\|", s)]
+
+
+def _is_table_separator_row(line: str) -> bool:
+    """Return True if line is a GFM table separator row (including Unicode dashes)."""
+    s = line.strip()
+    if not s or "|" not in s or not _SEP_ROW_RE.match(s):
+        return False
+    return bool(re.search(r"[-–—−─━═]", s))
+
+
+def _is_strict_bordered_pipe_row(line: str) -> bool:
+    s = line.strip()
+    return len(s) >= 3 and s.startswith("|") and s.endswith("|") and not s.endswith(r"\|")
+
+
+def _is_loose_pipe_row(line: str) -> bool:
+    s = line.strip()
+    if not s or re.match(r"^(?:#{1,6}\s|>\s?|[-*+]\s|\d+[.)]\s)", s):
+        return False
+    return bool(re.search(r"(?<!\\)\|", s))
+
+
+def _format_separator_row(raw_sep_line: str | None, col_count: int) -> str:
+    """Build a canonical ASCII GFM separator row with exact ``col_count`` columns."""
+    raw_cells = _split_table_cells(raw_sep_line) if raw_sep_line else []
+    out_cells: list[str] = []
+    for idx in range(col_count):
+        spec = raw_cells[idx] if idx < len(raw_cells) else "---"
+        spec = _UNICODE_DASHES_RE.sub("---", spec).strip()
+        left_colon = spec.startswith(":")
+        right_colon = spec.endswith(":")
+        if left_colon and right_colon:
+            out_cells.append(":---:")
+        elif left_colon:
+            out_cells.append(":---")
+        elif right_colon:
+            out_cells.append("---:")
+        else:
+            out_cells.append("---")
+    return "| " + " | ".join(out_cells) + " |"
+
+
+def _format_data_row(cells: list[str], col_count: int) -> str:
+    padded = list(cells[:col_count])
+    while len(padded) < col_count:
+        padded.append("")
+    return "| " + " | ".join(padded) + " |"
+
+
+def _normalize_markdown_tables(text: str) -> str:
+    """Repair common Gemini copy quirks in GFM tables so markdown-it-py always renders <table>.
+
+    Fixes:
+    - Blank lines inserted between table rows
+    - Unicode dashes (em/en/box-drawing) in separator rows
+    - Excess leading indentation (4+ spaces) turning tables into code blocks
+    - Mismatched column counts between header and separator rows
+    - Bordered pipe tables missing a ``| --- |`` separator row
+    - Missing blank lines before/after a table block
+    """
+    lines = text.split("\n")
+    n = len(lines)
+    out: list[str] = []
+    i = 0
+
+    while i < n:
+        line_i = lines[i]
+        if _is_loose_pipe_row(line_i) and not _is_table_separator_row(line_i):
+            header_cells = _split_table_cells(line_i)
+            col_count = len(header_cells)
+
+            # Look ahead at next non-blank line (allowing at most 1 blank line after header)
+            j = i + 1
+            if j < n and not lines[j].strip():
+                j += 1
+
+            has_sep = j < n and _is_table_separator_row(lines[j]) and col_count >= 1
+            has_implicit_bordered = (
+                not has_sep
+                and col_count >= 2
+                and _is_strict_bordered_pipe_row(line_i)
+                and j < n
+                and _is_strict_bordered_pipe_row(lines[j])
+                and len(_split_table_cells(lines[j])) == col_count
+            )
+
+            if has_sep or has_implicit_bordered:
+                sep_line = lines[j] if has_sep else None
+                cursor = j + 1 if has_sep else j
+
+                body_rows: list[list[str]] = []
+                while cursor < n:
+                    cur_line = lines[cursor]
+                    if not cur_line.strip():
+                        # Collapse single blank line only if followed by another table row
+                        nxt_idx = cursor + 1
+                        if nxt_idx < n and _is_loose_pipe_row(lines[nxt_idx]) and not _is_table_separator_row(lines[nxt_idx]):
+                            cursor = nxt_idx
+                            continue
+                        break
+                    if _is_table_separator_row(cur_line):
+                        cursor += 1
+                        continue
+                    if _is_loose_pipe_row(cur_line):
+                        body_rows.append(_split_table_cells(cur_line))
+                        cursor += 1
+                        continue
+                    break
+
+                # Ensure blank line before table
+                if out and out[-1].strip():
+                    out.append("")
+
+                out.append(_format_data_row(header_cells, col_count))
+                out.append(_format_separator_row(sep_line, col_count))
+                for row_cells in body_rows:
+                    out.append(_format_data_row(row_cells, col_count))
+
+                # Ensure blank line after table if more content follows
+                if cursor < n and lines[cursor].strip():
+                    out.append("")
+
+                i = cursor
+                continue
+
+        out.append(line_i)
+        i += 1
+
+    return "\n".join(out)
+
+
 def extract_latex_expressions(
     markdown_text: str,
     auto_detect_latex: bool = True,
@@ -828,6 +973,10 @@ def extract_latex_expressions(
     code_store: dict[str, str] = {}
     working = _protect_fenced_code(normalized, code_store)
     working = _protect_inline_code(working, code_store)
+
+    # Normalize invisible/non-breaking spaces outside code blocks (common in Gemini clipboard)
+    working = _NBSP_RE.sub(" ", working)
+    working = _INVISIBLE_ZW_RE.sub("", working)
 
     occurrences: dict[str, MathOccurrence] = {}
     dedup_map: dict[tuple[bool, str], str] = {}
@@ -881,7 +1030,10 @@ def extract_latex_expressions(
         working = _extract_bare_standalone_lines(working, register_math)
         working = _extract_bare_inline_math(working, register_math)
 
-    # 4) Restore protected code blocks & inline code (reverse order handles nested restores safely)
+    # 4) Normalize Markdown tables (fixes Gemini NBSP, blank lines between rows, Unicode dashes, etc.)
+    working = _normalize_markdown_tables(working)
+
+    # 5) Restore protected code blocks & inline code (reverse order handles nested restores safely)
     for token in reversed(list(code_store.keys())):
         working = working.replace(token, code_store[token])
 
