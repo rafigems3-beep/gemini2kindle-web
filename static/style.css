@@ -308,7 +308,33 @@ textarea:focus {
 
 .advanced-field {
   margin-top: 10px;
+  margin-bottom: 10px;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--ink);
+  cursor: pointer;
   margin-bottom: 4px;
+}
+
+.checkbox-row input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  accent-color: var(--accent);
+  flex-shrink: 0;
+}
+
+.checkbox-row code {
+  font-size: 0.78rem;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--surface-subtle);
 }
 
 .status-banner {

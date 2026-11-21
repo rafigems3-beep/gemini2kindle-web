@@ -62,7 +62,7 @@
             id="markdownInput"
             name="markdown"
             rows="12"
-            placeholder="Tempel hasil tombol Copy dari Gemini di sini (mendukung tabel, blok kode, serta rumus $$...$$, \[...\], $...$, \(...\))..."
+            placeholder="Tempel hasil Copy dari Gemini di sini (mendukung $$...$$, \[...\], $...$, \(...\), serta auto-deteksi LaTeX tanpa tanda $...$)..."
             spellcheck="false"
             required
           ></textarea>
@@ -112,6 +112,10 @@
               autocomplete="off"
             />
           </div>
+          <label class="checkbox-row" for="autoDetectCheckbox">
+            <input type="checkbox" id="autoDetectCheckbox" checked />
+            <span>Auto-deteksi LaTeX tanpa tanda <code>$...$</code> (cocok untuk salinan Gemini tanpa delimiter)</span>
+          </label>
         </details>
 
         <div id="statusBanner" class="status-banner hidden" role="status" aria-live="polite">

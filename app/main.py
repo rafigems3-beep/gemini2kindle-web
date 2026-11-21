@@ -36,6 +36,10 @@ class DocumentRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=200, description="Judul dokumen EPUB")
     markdown: str = Field(..., min_length=1, description="Teks Markdown hasil tombol Copy dari Gemini")
     author: str | None = Field(default=None, max_length=120, description="Nama penulis opsional")
+    auto_detect_latex: bool = Field(
+        default=True,
+        description="Deteksi otomatis rumus LaTeX tanpa tanda $...$ / $$...$$",
+    )
 
 
 def get_current_settings() -> Settings:
@@ -106,6 +110,7 @@ async def generate_epub(
             markdown_text=payload.markdown,
             settings=settings,
             author=payload.author,
+            auto_detect_latex=payload.auto_detect_latex,
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("EPUB generation failed")
@@ -142,6 +147,7 @@ async def send_kindle(
             markdown_text=payload.markdown,
             settings=settings,
             author=payload.author,
+            auto_detect_latex=payload.auto_detect_latex,
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("EPUB generation failed before Kindle send")

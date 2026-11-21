@@ -10,6 +10,7 @@
     markdownInput: document.getElementById('markdownInput'),
     pinInput: document.getElementById('pinInput'),
     authorInput: document.getElementById('authorInput'),
+    autoDetectCheckbox: document.getElementById('autoDetectCheckbox'),
     togglePinBtn: document.getElementById('togglePinBtn'),
     forgetPinBtn: document.getElementById('forgetPinBtn'),
     pasteBtn: document.getElementById('pasteBtn'),
@@ -100,15 +101,44 @@ def delta_u(q_joule: float, w_joule: float) -> float:
   function countApproxFormulas(md) {
     if (!md) return 0;
     // Strip fenced code blocks and inline code roughly for estimation
-    const noCode = md
+    let rest = md
       .replace(/```[\s\S]*?```/g, '')
       .replace(/~~~[\s\S]*?~~~/g, '')
       .replace(/`[^`\n]+`/g, '');
-    const blocks = (noCode.match(/\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]/g) || []).length;
-    const stripped = noCode.replace(/\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]/g, '');
-    const inlineParen = (stripped.match(/\\\([\s\S]+?\\\)/g) || []).length;
-    const inlineDollar = (stripped.match(/(?<!\\)\$(?!\s|\$)(?:\\\$|[^$\n])+?(?<!\s)\$(?!\d|\$)/g) || []).length;
-    return blocks + inlineParen + inlineDollar;
+
+    let count = 0;
+
+    // 1. Explicit display math $$...$$ and \[...\]
+    const blocks = rest.match(/\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]/g) || [];
+    count += blocks.length;
+    rest = rest.replace(/\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]/g, ' ');
+
+    // 2. Explicit inline math \(...\) and $...$
+    const inlineParen = rest.match(/\\\([\s\S]+?\\\)/g) || [];
+    count += inlineParen.length;
+    rest = rest.replace(/\\\([\s\S]+?\\\)/g, ' ');
+
+    const inlineDollar = rest.match(/(?<!\\)\$(?!\s|\$)(?:\\\$|[^$\n])+?(?<!\s)\$(?!\d|\$)/g) || [];
+    count += inlineDollar.length;
+    rest = rest.replace(/(?<!\\)\$(?!\s|\$)(?:\\\$|[^$\n])+?(?<!\s)\$(?!\d|\$)/g, ' ');
+
+    // 3. Auto-detected bare LaTeX (environments, [ ... ], \frac, \Delta, \ce, ^{...}, etc.)
+    const autoDetect = !els.autoDetectCheckbox || els.autoDetectCheckbox.checked;
+    if (autoDetect) {
+      const bareEnvs = rest.match(/\\begin\{[a-zA-Z*]+\}[\s\S]+?\\end\{[a-zA-Z*]+\}/g) || [];
+      count += bareEnvs.length;
+      rest = rest.replace(/\\begin\{[a-zA-Z*]+\}[\s\S]+?\\end\{[a-zA-Z*]+\}/g, ' ');
+
+      const bareLines = rest.split('\n');
+      const texSignal = /\\(?:frac|dfrac|tfrac|sqrt|int|sum|prod|lim|ce|alpha|beta|gamma|delta|theta|lambda|mu|pi|sigma|omega|Delta|Sigma|Omega|partial|nabla|infty|pm|times|cdot|approx|leq|geq|neq|to|rightarrow|Rightarrow|implies|iff|text|mathrm|mathbf|mathbb|vec|hat|bar|left|right|sin|cos|tan|log|ln)\b|[A-Za-z0-9][_^]\{[^{}\n]+\}/;
+      for (const line of bareLines) {
+        if (texSignal.test(line)) {
+          count += 1;
+        }
+      }
+    }
+
+    return count;
   }
 
   function updateStats() {
@@ -199,6 +229,7 @@ def delta_u(q_joule: float, w_joule: float) -> float:
       payload: {
         title,
         markdown: els.markdownInput.value,
+        auto_detect_latex: !els.autoDetectCheckbox || els.autoDetectCheckbox.checked,
         ...(author ? { author } : {}),
       },
     };
@@ -453,6 +484,10 @@ def delta_u(q_joule: float, w_joule: float) -> float:
     hideStatus();
     els.markdownInput.focus();
   });
+
+  if (els.autoDetectCheckbox) {
+    els.autoDetectCheckbox.addEventListener('change', updateStats);
+  }
 
   window.addEventListener('beforeinstallprompt', (event) => {
     event.preventDefault();
