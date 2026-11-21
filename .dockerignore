@@ -1,0 +1,11 @@
+.git
+.gitignore
+.env
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+math_renderer/node_modules/
+tests/
+*.epub
