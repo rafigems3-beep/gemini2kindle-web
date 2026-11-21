@@ -1,0 +1,11 @@
+{
+  "name": "gemini2kindle-math-renderer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Batch LaTeX-to-PNG (300 DPI transparent) renderer using MathJax 3 and Resvg",
+  "main": "render.js",
+  "dependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "mathjax-full": "^3.2.2"
+  }
+}

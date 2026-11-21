@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#1c1917" />
+  <meta name="description" content="Ubah Markdown + LaTeX dari Gemini menjadi EPUB 3 ramah e-ink dan kirim langsung ke Kindle." />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Gemini2Kindle" />
+
+  <title>Gemini2Kindle Web</title>
+
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/static/icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="/static/icons/icon-192.png" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="app-header">
+      <div class="brand">
+        <img src="/static/icons/icon-192.png" alt="" class="brand-icon" width="36" height="36" />
+        <div>
+          <h1>Gemini2Kindle</h1>
+          <p class="subtitle">Markdown + LaTeX ke EPUB 3 ramah e-ink</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button type="button" id="installBtn" class="chip-btn hidden" aria-label="Pasang Aplikasi">
+          + Pasang
+        </button>
+        <span id="serverBadge" class="status-pill" title="Status server">Memeriksa...</span>
+      </div>
+    </header>
+
+    <main class="card">
+      <form id="converterForm" novalidate>
+        <div class="field">
+          <label for="titleInput">Judul Dokumen</label>
+          <input
+            type="text"
+            id="titleInput"
+            name="title"
+            maxlength="200"
+            placeholder="Contoh: Ringkasan Termodinamika"
+            autocomplete="off"
+            required
+          />
+        </div>
+
+        <div class="field">
+          <div class="field-header">
+            <label for="markdownInput">Markdown dari Gemini</label>
+            <div class="inline-tools">
+              <button type="button" id="pasteBtn" class="tool-btn">Tempel</button>
+              <button type="button" id="sampleBtn" class="tool-btn">Contoh</button>
+              <button type="button" id="clearBtn" class="tool-btn">Bersihkan</button>
+            </div>
+          </div>
+          <textarea
+            id="markdownInput"
+            name="markdown"
+            rows="12"
+            placeholder="Tempel hasil tombol Copy dari Gemini di sini (mendukung tabel, blok kode, serta rumus $$...$$, \[...\], $...$, \(...\))..."
+            spellcheck="false"
+            required
+          ></textarea>
+          <div class="field-meta">
+            <span id="contentStats">0 karakter • 0 rumus terdeteksi</span>
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="field-header">
+            <label for="pinInput">PIN Keamanan</label>
+            <button type="button" id="forgetPinBtn" class="link-btn hidden">Hapus PIN tersimpan</button>
+          </div>
+          <div class="pin-row">
+            <input
+              type="password"
+              id="pinInput"
+              name="pin"
+              inputmode="text"
+              autocomplete="current-password"
+              placeholder="Masukkan APP_PIN"
+              required
+            />
+            <button
+              type="button"
+              id="togglePinBtn"
+              class="icon-btn"
+              aria-label="Tampilkan atau sembunyikan PIN"
+              title="Tampilkan PIN"
+            >
+              Lihat
+            </button>
+          </div>
+          <p class="hint">Disimpan secara lokal di browser ini (<code>localStorage</code>).</p>
+        </div>
+
+        <details class="advanced-box">
+          <summary>Opsi lanjutan</summary>
+          <div class="field advanced-field">
+            <label for="authorInput">Penulis (Author metadata)</label>
+            <input
+              type="text"
+              id="authorInput"
+              name="author"
+              maxlength="120"
+              placeholder="Gemini"
+              autocomplete="off"
+            />
+          </div>
+        </details>
+
+        <div id="statusBanner" class="status-banner hidden" role="status" aria-live="polite">
+          <span id="statusSpinner" class="spinner hidden" aria-hidden="true"></span>
+          <div class="status-body">
+            <p id="statusTitle" class="status-title"></p>
+            <p id="statusDetail" class="status-detail"></p>
+          </div>
+        </div>
+
+        <div class="action-grid">
+          <button type="button" id="downloadBtn" class="btn btn-secondary">
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <span>Unduh EPUB</span>
+          </button>
+
+          <button type="button" id="sendKindleBtn" class="btn btn-primary">
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <span>Kirim ke Kindle</span>
+          </button>
+        </div>
+      </form>
+    </main>
+
+    <footer class="app-footer">
+      <p>Rumus LaTeX dirender 300 DPI transparan • CSS ramah e-ink</p>
+    </footer>
+  </div>
+
+  <script src="/static/app.js" defer></script>
+</body>
+</html>
