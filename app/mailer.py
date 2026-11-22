@@ -13,29 +13,46 @@ from app.config import Settings
 
 
 class MailerError(Exception):
-    """Raised when sending an EPUB to Kindle fails."""
+    """Raised when sending a document to Kindle fails."""
 
     def __init__(self, message: str, status_code: int = 502) -> None:
         super().__init__(message)
         self.status_code = status_code
 
 
-def _send_via_smtp(epub_bytes: bytes, filename: str, title: str, settings: Settings) -> dict[str, str]:
+def _split_mime_type(mime_type: str) -> tuple[str, str]:
+    cleaned = (mime_type or "application/octet-stream").strip()
+    if "/" in cleaned:
+        maintype, subtype = cleaned.split("/", 1)
+        if maintype and subtype:
+            return maintype, subtype
+    return "application", "octet-stream"
+
+
+def _send_via_smtp(
+    file_bytes: bytes,
+    filename: str,
+    subject: str,
+    mime_type: str,
+    settings: Settings,
+) -> dict[str, str]:
     if not settings.smtp_user or not settings.smtp_password:
         raise MailerError(
             "Konfigurasi SMTP belum lengkap (SMTP_USER / SMTP_PASSWORD kosong).",
             status_code=503,
         )
 
+    maintype, subtype = _split_mime_type(mime_type)
+
     msg = EmailMessage()
     msg["From"] = settings.smtp_user
     msg["To"] = settings.kindle_email
-    msg["Subject"] = title
-    msg.set_content(f"Dokumen EPUB '{title}' dikirim dari Gemini2Kindle Web.")
+    msg["Subject"] = subject
+    msg.set_content(f"Dokumen '{filename}' dikirim dari Gemini2Kindle Web.")
     msg.add_attachment(
-        epub_bytes,
-        maintype="application",
-        subtype="epub+zip",
+        file_bytes,
+        maintype=maintype,
+        subtype=subtype,
         filename=filename,
     )
 
@@ -46,13 +63,13 @@ def _send_via_smtp(epub_bytes: bytes, filename: str, title: str, settings: Setti
             with smtplib.SMTP_SSL(
                 settings.smtp_host,
                 settings.smtp_port,
-                timeout=30,
+                timeout=60,
                 context=ssl_context,
             ) as server:
                 server.login(settings.smtp_user, settings.smtp_password)
                 server.send_message(msg)
         else:
-            with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=30) as server:
+            with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=60) as server:
                 server.ehlo()
                 server.starttls(context=ssl_context)
                 server.ehlo()
@@ -75,9 +92,10 @@ def _send_via_smtp(epub_bytes: bytes, filename: str, title: str, settings: Setti
 
 
 def _send_via_apps_script(
-    epub_bytes: bytes,
+    file_bytes: bytes,
     filename: str,
-    title: str,
+    subject: str,
+    mime_type: str,
     settings: Settings,
 ) -> dict[str, str]:
     if not settings.apps_script_url or not settings.apps_script_token:
@@ -86,17 +104,20 @@ def _send_via_apps_script(
             status_code=503,
         )
 
+    # Keep key name `epub_base64` for backwards compatibility with existing Apps Script deployments,
+    # alongside `mime_type` so updated scripts attach PDF/DOCX/TXT/images with exact MIME types.
     payload = {
         "token": settings.apps_script_token,
         "to": settings.kindle_email,
-        "subject": title,
+        "subject": subject,
         "filename": filename,
-        "epub_base64": base64.b64encode(epub_bytes).decode("ascii"),
+        "mime_type": mime_type,
+        "epub_base64": base64.b64encode(file_bytes).decode("ascii"),
     }
 
     try:
         # Google Apps Script Web App always responds with a 302 redirect to googleusercontent.com
-        with httpx.Client(follow_redirects=True, timeout=60.0) as client:
+        with httpx.Client(follow_redirects=True, timeout=90.0) as client:
             resp = client.post(settings.apps_script_url, json=payload)
     except httpx.HTTPError as exc:
         raise MailerError(
@@ -131,13 +152,14 @@ def _send_via_apps_script(
     return {"mode": "apps_script", "to": settings.kindle_email}
 
 
-def send_epub_to_kindle(
-    epub_bytes: bytes,
+def send_file_to_kindle(
+    file_bytes: bytes,
     filename: str,
-    title: str,
+    subject: str,
+    mime_type: str,
     settings: Settings,
 ) -> dict[str, str]:
-    """Dispatch EPUB delivery according to ``MAIL_MODE`` (``smtp`` or ``apps_script``)."""
+    """Dispatch any Kindle-supported file attachment according to ``MAIL_MODE``."""
     if not settings.kindle_email:
         raise MailerError(
             "Alamat email Kindle (KINDLE_EMAIL) belum dikonfigurasi di server.",
@@ -145,8 +167,24 @@ def send_epub_to_kindle(
         )
 
     if settings.mail_mode == "apps_script":
-        return _send_via_apps_script(epub_bytes, filename, title, settings)
+        return _send_via_apps_script(file_bytes, filename, subject, mime_type, settings)
     if settings.mail_mode == "smtp":
-        return _send_via_smtp(epub_bytes, filename, title, settings)
+        return _send_via_smtp(file_bytes, filename, subject, mime_type, settings)
 
     raise MailerError(f"MAIL_MODE tidak dikenal: {settings.mail_mode}", status_code=500)
+
+
+def send_epub_to_kindle(
+    epub_bytes: bytes,
+    filename: str,
+    title: str,
+    settings: Settings,
+) -> dict[str, str]:
+    """Dispatch EPUB delivery according to ``MAIL_MODE`` (``smtp`` or ``apps_script``)."""
+    return send_file_to_kindle(
+        file_bytes=epub_bytes,
+        filename=filename,
+        subject=title,
+        mime_type="application/epub+zip",
+        settings=settings,
+    )

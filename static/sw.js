@@ -1,4 +1,4 @@
-const CACHE_NAME = 'g2k-shell-v2';
+const CACHE_NAME = 'g2k-shell-v3';
 const SHELL_ASSETS = [
   '/',
   '/manifest.json',

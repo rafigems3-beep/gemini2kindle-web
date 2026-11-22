@@ -3,8 +3,21 @@
 
   const PIN_STORAGE_KEY = 'g2k_app_pin';
   const AUTHOR_STORAGE_KEY = 'g2k_default_author';
+  const AUTO_SEND_STORAGE_KEY = 'g2k_auto_send_file';
+
+  const ALLOWED_EXTENSIONS = new Set([
+    '.epub', '.pdf', '.docx', '.doc', '.txt', '.rtf',
+    '.html', '.htm', '.png', '.jpg', '.jpeg', '.gif', '.bmp',
+  ]);
 
   const els = {
+    tabMarkdown: document.getElementById('tabMarkdown'),
+    tabFile: document.getElementById('tabFile'),
+    panelMarkdown: document.getElementById('panelMarkdown'),
+    panelFile: document.getElementById('panelFile'),
+    actionsMarkdown: document.getElementById('actionsMarkdown'),
+    actionsFile: document.getElementById('actionsFile'),
+
     form: document.getElementById('converterForm'),
     titleInput: document.getElementById('titleInput'),
     markdownInput: document.getElementById('markdownInput'),
@@ -19,6 +32,20 @@
     contentStats: document.getElementById('contentStats'),
     downloadBtn: document.getElementById('downloadBtn'),
     sendKindleBtn: document.getElementById('sendKindleBtn'),
+
+    dropZone: document.getElementById('dropZone'),
+    fileInput: document.getElementById('fileInput'),
+    fileLimitHint: document.getElementById('fileLimitHint'),
+    filePreview: document.getElementById('filePreview'),
+    fileExtBadge: document.getElementById('fileExtBadge'),
+    fileNameText: document.getElementById('fileNameText'),
+    fileSizeText: document.getElementById('fileSizeText'),
+    clearFileBtn: document.getElementById('clearFileBtn'),
+    pdfConvertBox: document.getElementById('pdfConvertBox'),
+    convertPdfCheckbox: document.getElementById('convertPdfCheckbox'),
+    autoSendFileCheckbox: document.getElementById('autoSendFileCheckbox'),
+    sendFileBtn: document.getElementById('sendFileBtn'),
+
     statusBanner: document.getElementById('statusBanner'),
     statusSpinner: document.getElementById('statusSpinner'),
     statusTitle: document.getElementById('statusTitle'),
@@ -28,6 +55,8 @@
   };
 
   let isBusy = false;
+  let maxUploadMb = 20;
+  let selectedFile = null;
   let deferredInstallPrompt = null;
 
   const SAMPLE_MARKDOWN = `# Hukum Pertama Termodinamika
@@ -86,9 +115,13 @@ def delta_u(q_joule: float, w_joule: float) -> float:
     isBusy = busy;
     els.downloadBtn.disabled = busy;
     els.sendKindleBtn.disabled = busy;
+    els.sendFileBtn.disabled = busy;
     els.pasteBtn.disabled = busy;
     els.sampleBtn.disabled = busy;
     els.clearBtn.disabled = busy;
+    els.clearFileBtn.disabled = busy;
+    els.tabMarkdown.disabled = busy;
+    els.tabFile.disabled = busy;
   }
 
   function formatBytes(bytes) {
@@ -98,9 +131,31 @@ def delta_u(q_joule: float, w_joule: float) -> float:
     return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
   }
 
+  function getFileExtension(filename) {
+    const idx = String(filename || '').lastIndexOf('.');
+    if (idx === -1) return '';
+    return filename.slice(idx).toLowerCase();
+  }
+
+  function switchTab(mode) {
+    if (isBusy) return;
+    const isFileMode = mode === 'file';
+
+    els.tabMarkdown.classList.toggle('active', !isFileMode);
+    els.tabMarkdown.setAttribute('aria-selected', String(!isFileMode));
+    els.tabFile.classList.toggle('active', isFileMode);
+    els.tabFile.setAttribute('aria-selected', String(isFileMode));
+
+    els.panelMarkdown.classList.toggle('hidden', isFileMode);
+    els.panelFile.classList.toggle('hidden', !isFileMode);
+    els.actionsMarkdown.classList.toggle('hidden', isFileMode);
+    els.actionsFile.classList.toggle('hidden', !isFileMode);
+
+    hideStatus();
+  }
+
   function countApproxFormulas(md) {
     if (!md) return 0;
-    // Strip fenced code blocks and inline code roughly for estimation
     let rest = md
       .replace(/```[\s\S]*?```/g, '')
       .replace(/~~~[\s\S]*?~~~/g, '')
@@ -122,7 +177,7 @@ def delta_u(q_joule: float, w_joule: float) -> float:
     count += inlineDollar.length;
     rest = rest.replace(/(?<!\\)\$(?!\s|\$)(?:\\\$|[^$\n])+?(?<!\s)\$(?!\d|\$)/g, ' ');
 
-    // 3. Auto-detected bare LaTeX (environments, [ ... ], \frac, \Delta, \ce, ^{...}, etc.)
+    // 3. Auto-detected bare LaTeX
     const autoDetect = !els.autoDetectCheckbox || els.autoDetectCheckbox.checked;
     if (autoDetect) {
       const bareEnvs = rest.match(/\\begin\{[a-zA-Z*]+\}[\s\S]+?\\end\{[a-zA-Z*]+\}/g) || [];
@@ -172,6 +227,9 @@ def delta_u(q_joule: float, w_joule: float) -> float:
       if (savedAuthor) {
         els.authorInput.value = savedAuthor;
       }
+      if (els.autoSendFileCheckbox) {
+        els.autoSendFileCheckbox.checked = localStorage.getItem(AUTO_SEND_STORAGE_KEY) === '1';
+      }
       syncForgetPinVisibility();
     } catch (_err) {
       // Ignore storage errors in restricted browsing modes
@@ -189,12 +247,22 @@ def delta_u(q_joule: float, w_joule: float) -> float:
     }
   }
 
-  function validateInputs() {
+  function requirePin() {
+    const pin = els.pinInput.value.trim();
+    if (!pin) {
+      showStatus('error', 'PIN keamanan belum diisi.', 'Masukkan APP_PIN yang sesuai dengan konfigurasi server.');
+      els.pinInput.focus();
+      return null;
+    }
+    persistPin(pin);
+    return pin;
+  }
+
+  function validateMarkdownInputs() {
     maybeAutoFillTitleFromMarkdown();
 
     const title = els.titleInput.value.trim();
     const markdown = els.markdownInput.value.trim();
-    const pin = els.pinInput.value.trim();
     const author = els.authorInput.value.trim();
 
     if (!title) {
@@ -207,13 +275,9 @@ def delta_u(q_joule: float, w_joule: float) -> float:
       els.markdownInput.focus();
       return null;
     }
-    if (!pin) {
-      showStatus('error', 'PIN keamanan belum diisi.', 'Masukkan APP_PIN yang sesuai dengan konfigurasi server.');
-      els.pinInput.focus();
-      return null;
-    }
+    const pin = requirePin();
+    if (!pin) return null;
 
-    persistPin(pin);
     try {
       if (author) {
         localStorage.setItem(AUTHOR_STORAGE_KEY, author);
@@ -276,7 +340,7 @@ def delta_u(q_joule: float, w_joule: float) -> float:
 
   async function handleDownloadEpub() {
     if (isBusy) return;
-    const validated = validateInputs();
+    const validated = validateMarkdownInputs();
     if (!validated) return;
 
     setBusy(true);
@@ -330,7 +394,7 @@ def delta_u(q_joule: float, w_joule: float) -> float:
 
   async function handleSendKindle() {
     if (isBusy) return;
-    const validated = validateInputs();
+    const validated = validateMarkdownInputs();
     if (!validated) return;
 
     setBusy(true);
@@ -370,11 +434,123 @@ def delta_u(q_joule: float, w_joule: float) -> float:
     }
   }
 
+  function clearSelectedFile() {
+    selectedFile = null;
+    els.fileInput.value = '';
+    els.filePreview.classList.add('hidden');
+    els.pdfConvertBox.classList.add('hidden');
+    els.convertPdfCheckbox.checked = false;
+  }
+
+  function handleSelectedFile(file) {
+    if (!file) return;
+
+    const ext = getFileExtension(file.name);
+    if (!ALLOWED_EXTENSIONS.has(ext)) {
+      clearSelectedFile();
+      showStatus(
+        'error',
+        `Format "${ext || 'tidak dikenal'}" tidak didukung Kindle.`,
+        'Gunakan EPUB, PDF, DOCX, DOC, TXT, RTF, HTML, PNG, JPG, GIF, atau BMP.'
+      );
+      return;
+    }
+
+    const maxBytes = maxUploadMb * 1024 * 1024;
+    if (file.size > maxBytes) {
+      clearSelectedFile();
+      showStatus(
+        'error',
+        `Ukuran file terlalu besar (${formatBytes(file.size)}).`,
+        `Batas maksimal pengiriman via email Kindle adalah ${maxUploadMb} MB.`
+      );
+      return;
+    }
+
+    if (file.size === 0) {
+      clearSelectedFile();
+      showStatus('error', 'File kosong (0 byte).', 'Pilih file dokumen yang valid.');
+      return;
+    }
+
+    selectedFile = file;
+    els.fileExtBadge.textContent = ext.replace('.', '').toUpperCase();
+    els.fileNameText.textContent = file.name;
+    els.fileSizeText.textContent = formatBytes(file.size);
+    els.filePreview.classList.remove('hidden');
+    els.pdfConvertBox.classList.toggle('hidden', ext !== '.pdf');
+    hideStatus();
+
+    if (els.autoSendFileCheckbox && els.autoSendFileCheckbox.checked) {
+      handleSendFile();
+    }
+  }
+
+  async function handleSendFile() {
+    if (isBusy) return;
+
+    if (!selectedFile) {
+      els.fileInput.click();
+      return;
+    }
+
+    const pin = requirePin();
+    if (!pin) return;
+
+    setBusy(true);
+    showStatus(
+      'loading',
+      `Mengirim ${selectedFile.name} ke Kindle...`,
+      `Mengunggah file (${formatBytes(selectedFile.size)}) ke server lalu meneruskannya ke Kindle.`
+    );
+
+    try {
+      const formData = new FormData();
+      formData.append('file', selectedFile, selectedFile.name);
+      formData.append('convert_pdf', els.convertPdfCheckbox.checked ? 'true' : 'false');
+
+      const response = await fetch('/api/send-file', {
+        method: 'POST',
+        headers: {
+          'X-App-Pin': pin,
+        },
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errMsg = await extractErrorMessage(response);
+        showStatus('error', 'Gagal mengirim file ke Kindle', errMsg);
+        return;
+      }
+
+      const data = await response.json();
+      const modeLabel = data.mail_mode === 'apps_script' ? 'Apps Script' : 'SMTP';
+      const pdfNote = data.converted_pdf ? ' • Konversi teks PDF aktif' : '';
+      showStatus(
+        'success',
+        'File berhasil dikirim ke Kindle!',
+        `${data.filename} (${formatBytes(data.size_bytes)})${pdfNote} • Mode ${modeLabel}.`
+      );
+    } catch (err) {
+      showStatus('error', 'Koneksi terputus', `Tidak dapat menghubungi server: ${err.message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function checkServerHealth() {
     try {
       const resp = await fetch('/api/health', { cache: 'no-store' });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const info = await resp.json();
+
+      if (Number.isFinite(info.max_upload_mb) && info.max_upload_mb > 0) {
+        maxUploadMb = info.max_upload_mb;
+        if (els.fileLimitHint) {
+          els.fileLimitHint.textContent =
+            `EPUB, PDF, DOCX, DOC, TXT, RTF, HTML, PNG, JPG, GIF, BMP • Maks. ${maxUploadMb} MB`;
+        }
+      }
 
       if (!info.pin_configured) {
         els.serverBadge.textContent = 'APP_PIN belum diset';
@@ -405,7 +581,11 @@ def delta_u(q_joule: float, w_joule: float) -> float:
     }
   }
 
-  // Event bindings
+  // Tab bindings
+  els.tabMarkdown.addEventListener('click', () => switchTab('markdown'));
+  els.tabFile.addEventListener('click', () => switchTab('file'));
+
+  // Markdown mode bindings
   els.downloadBtn.addEventListener('click', handleDownloadEpub);
   els.sendKindleBtn.addEventListener('click', handleSendKindle);
 
@@ -425,6 +605,64 @@ def delta_u(q_joule: float, w_joule: float) -> float:
     }, 10);
   });
 
+  // Direct file upload bindings
+  els.fileInput.addEventListener('click', (e) => {
+    e.stopPropagation();
+  });
+
+  els.dropZone.addEventListener('click', (e) => {
+    if (e.target === els.fileInput || isBusy) return;
+    els.fileInput.click();
+  });
+
+  els.dropZone.addEventListener('keydown', (e) => {
+    if (!isBusy && (e.key === 'Enter' || e.key === ' ')) {
+      e.preventDefault();
+      els.fileInput.click();
+    }
+  });
+
+  els.dropZone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    if (!isBusy) els.dropZone.classList.add('drag-over');
+  });
+
+  els.dropZone.addEventListener('dragleave', () => {
+    els.dropZone.classList.remove('drag-over');
+  });
+
+  els.dropZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    els.dropZone.classList.remove('drag-over');
+    if (isBusy) return;
+    const dropped = e.dataTransfer?.files?.[0];
+    if (dropped) handleSelectedFile(dropped);
+  });
+
+  els.fileInput.addEventListener('change', () => {
+    const picked = els.fileInput.files?.[0];
+    els.fileInput.value = '';
+    if (picked) handleSelectedFile(picked);
+  });
+
+  els.clearFileBtn.addEventListener('click', () => {
+    clearSelectedFile();
+    hideStatus();
+  });
+
+  els.sendFileBtn.addEventListener('click', handleSendFile);
+
+  if (els.autoSendFileCheckbox) {
+    els.autoSendFileCheckbox.addEventListener('change', () => {
+      try {
+        localStorage.setItem(AUTO_SEND_STORAGE_KEY, els.autoSendFileCheckbox.checked ? '1' : '0');
+      } catch (_err) {
+        // Ignore
+      }
+    });
+  }
+
+  // PIN bindings
   els.pinInput.addEventListener('change', () => {
     const val = els.pinInput.value.trim();
     if (val) persistPin(val);
@@ -444,9 +682,10 @@ def delta_u(q_joule: float, w_joule: float) -> float:
     }
     els.pinInput.value = '';
     syncForgetPinVisibility();
-    showStatus('info', 'PIN tersimpan dihapus.', 'Masukkan kembali PIN saat ingin mengonversi dokumen.');
+    showStatus('info', 'PIN tersimpan dihapus.', 'Masukkan kembali PIN saat ingin mengonversi atau mengirim file.');
   });
 
+  // Markdown helper toolbar
   els.pasteBtn.addEventListener('click', async () => {
     try {
       if (!navigator.clipboard || !navigator.clipboard.readText) {
@@ -489,6 +728,7 @@ def delta_u(q_joule: float, w_joule: float) -> float:
     els.autoDetectCheckbox.addEventListener('change', updateStats);
   }
 
+  // PWA install prompt
   window.addEventListener('beforeinstallprompt', (event) => {
     event.preventDefault();
     deferredInstallPrompt = event;

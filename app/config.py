@@ -49,6 +49,7 @@ class Settings:
     default_author: str
     default_language: str
     max_markdown_chars: int
+    max_upload_mb: int
 
     @property
     def is_mail_configured(self) -> bool:
@@ -87,4 +88,5 @@ def load_settings() -> Settings:
         default_author=_env_str("DEFAULT_AUTHOR", "Gemini"),
         default_language=_env_str("DEFAULT_LANGUAGE", "id"),
         max_markdown_chars=_env_int("MAX_MARKDOWN_CHARS", 1_500_000, min_val=10_000, max_val=5_000_000),
+        max_upload_mb=_env_int("MAX_UPLOAD_MB", 20, min_val=1, max_val=25),
     )

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#1c1917" />
-  <meta name="description" content="Ubah Markdown + LaTeX dari Gemini menjadi EPUB 3 ramah e-ink dan kirim langsung ke Kindle." />
+  <meta name="description" content="Ubah Markdown + LaTeX dari Gemini menjadi EPUB 3 ramah e-ink atau kirim file langsung ke Kindle." />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="Gemini2Kindle" />
@@ -23,7 +23,7 @@
         <img src="/static/icons/icon-192.png" alt="" class="brand-icon" width="36" height="36" />
         <div>
           <h1>Gemini2Kindle</h1>
-          <p class="subtitle">Markdown + LaTeX ke EPUB 3 ramah e-ink</p>
+          <p class="subtitle">Markdown + LaTeX &amp; Kirim File ke Kindle</p>
         </div>
       </div>
       <div class="header-actions">
@@ -35,117 +35,202 @@
     </header>
 
     <main class="card">
-      <form id="converterForm" novalidate>
-        <div class="field">
-          <label for="titleInput">Judul Dokumen</label>
-          <input
-            type="text"
-            id="titleInput"
-            name="title"
-            maxlength="200"
-            placeholder="Contoh: Ringkasan Termodinamika"
-            autocomplete="off"
-            required
-          />
-        </div>
+      <nav class="tab-bar" role="tablist" aria-label="Mode Aplikasi">
+        <button
+          type="button"
+          id="tabMarkdown"
+          class="tab-btn active"
+          role="tab"
+          aria-selected="true"
+          aria-controls="panelMarkdown"
+        >
+          Gemini → EPUB
+        </button>
+        <button
+          type="button"
+          id="tabFile"
+          class="tab-btn"
+          role="tab"
+          aria-selected="false"
+          aria-controls="panelFile"
+        >
+          Kirim File Langsung
+        </button>
+      </nav>
 
-        <div class="field">
-          <div class="field-header">
-            <label for="markdownInput">Markdown dari Gemini</label>
-            <div class="inline-tools">
-              <button type="button" id="pasteBtn" class="tool-btn">Tempel</button>
-              <button type="button" id="sampleBtn" class="tool-btn">Contoh</button>
-              <button type="button" id="clearBtn" class="tool-btn">Bersihkan</button>
-            </div>
-          </div>
-          <textarea
-            id="markdownInput"
-            name="markdown"
-            rows="12"
-            placeholder="Tempel hasil Copy dari Gemini di sini (mendukung $$...$$, \[...\], $...$, \(...\), serta auto-deteksi LaTeX tanpa tanda $...$)..."
-            spellcheck="false"
-            required
-          ></textarea>
-          <div class="field-meta">
-            <span id="contentStats">0 karakter • 0 rumus terdeteksi</span>
-          </div>
-        </div>
-
-        <div class="field">
-          <div class="field-header">
-            <label for="pinInput">PIN Keamanan</label>
-            <button type="button" id="forgetPinBtn" class="link-btn hidden">Hapus PIN tersimpan</button>
-          </div>
-          <div class="pin-row">
-            <input
-              type="password"
-              id="pinInput"
-              name="pin"
-              inputmode="text"
-              autocomplete="current-password"
-              placeholder="Masukkan APP_PIN"
-              required
-            />
-            <button
-              type="button"
-              id="togglePinBtn"
-              class="icon-btn"
-              aria-label="Tampilkan atau sembunyikan PIN"
-              title="Tampilkan PIN"
-            >
-              Lihat
-            </button>
-          </div>
-          <p class="hint">Disimpan secara lokal di browser ini (<code>localStorage</code>).</p>
-        </div>
-
-        <details class="advanced-box">
-          <summary>Opsi lanjutan</summary>
-          <div class="field advanced-field">
-            <label for="authorInput">Penulis (Author metadata)</label>
+      <!-- TAB 1: Gemini Markdown + LaTeX to EPUB -->
+      <section id="panelMarkdown" role="tabpanel" aria-labelledby="tabMarkdown">
+        <form id="converterForm" novalidate>
+          <div class="field">
+            <label for="titleInput">Judul Dokumen</label>
             <input
               type="text"
-              id="authorInput"
-              name="author"
-              maxlength="120"
-              placeholder="Gemini"
+              id="titleInput"
+              name="title"
+              maxlength="200"
+              placeholder="Contoh: Ringkasan Termodinamika"
               autocomplete="off"
+              required
             />
           </div>
-          <label class="checkbox-row" for="autoDetectCheckbox">
-            <input type="checkbox" id="autoDetectCheckbox" checked />
-            <span>Auto-deteksi LaTeX tanpa tanda <code>$...$</code> (cocok untuk salinan Gemini tanpa delimiter)</span>
-          </label>
-        </details>
 
-        <div id="statusBanner" class="status-banner hidden" role="status" aria-live="polite">
-          <span id="statusSpinner" class="spinner hidden" aria-hidden="true"></span>
-          <div class="status-body">
-            <p id="statusTitle" class="status-title"></p>
-            <p id="statusDetail" class="status-detail"></p>
+          <div class="field">
+            <div class="field-header">
+              <label for="markdownInput">Markdown dari Gemini</label>
+              <div class="inline-tools">
+                <button type="button" id="pasteBtn" class="tool-btn">Tempel</button>
+                <button type="button" id="sampleBtn" class="tool-btn">Contoh</button>
+                <button type="button" id="clearBtn" class="tool-btn">Bersihkan</button>
+              </div>
+            </div>
+            <textarea
+              id="markdownInput"
+              name="markdown"
+              rows="12"
+              placeholder="Tempel hasil Copy dari Gemini di sini (mendukung $$...$$, \[...\], $...$, \(...\), serta auto-deteksi LaTeX tanpa tanda $...$)..."
+              spellcheck="false"
+              required
+            ></textarea>
+            <div class="field-meta">
+              <span id="contentStats">0 karakter • 0 rumus terdeteksi</span>
+            </div>
+          </div>
+
+          <details class="advanced-box">
+            <summary>Opsi lanjutan</summary>
+            <div class="field advanced-field">
+              <label for="authorInput">Penulis (Author metadata)</label>
+              <input
+                type="text"
+                id="authorInput"
+                name="author"
+                maxlength="120"
+                placeholder="Gemini"
+                autocomplete="off"
+              />
+            </div>
+            <label class="checkbox-row" for="autoDetectCheckbox">
+              <input type="checkbox" id="autoDetectCheckbox" checked />
+              <span>Auto-deteksi LaTeX tanpa tanda <code>$...$</code> (cocok untuk salinan Gemini tanpa delimiter)</span>
+            </label>
+          </details>
+        </form>
+      </section>
+
+      <!-- TAB 2: 1-Click Direct File to Kindle -->
+      <section id="panelFile" class="hidden" role="tabpanel" aria-labelledby="tabFile">
+        <div class="field">
+          <label for="fileInput">Pilih File untuk Kindle</label>
+          <div id="dropZone" class="drop-zone" tabindex="0" role="button" aria-label="Pilih atau tarik file untuk dikirim ke Kindle">
+            <input
+              type="file"
+              id="fileInput"
+              class="sr-only"
+              accept=".epub,.pdf,.docx,.doc,.txt,.rtf,.html,.htm,.png,.jpg,.jpeg,.gif,.bmp"
+            />
+            <svg class="drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+              <path d="M12 16V4m0 0l-4 4m4-4l4 4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <p class="drop-title">Ketuk untuk pilih file atau tarik ke sini</p>
+            <p id="fileLimitHint" class="drop-sub">EPUB, PDF, DOCX, DOC, TXT, RTF, HTML, PNG, JPG, GIF, BMP • Maks. 20 MB</p>
+          </div>
+
+          <div id="filePreview" class="file-preview hidden">
+            <span id="fileExtBadge" class="ext-badge">PDF</span>
+            <div class="file-info">
+              <p id="fileNameText" class="file-name"></p>
+              <p id="fileSizeText" class="file-size"></p>
+            </div>
+            <button type="button" id="clearFileBtn" class="tool-btn">Hapus</button>
           </div>
         </div>
 
-        <div class="action-grid">
-          <button type="button" id="downloadBtn" class="btn btn-secondary">
-            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-              <path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-            <span>Unduh EPUB</span>
-          </button>
+        <div id="pdfConvertBox" class="field option-card hidden">
+          <label class="checkbox-row" for="convertPdfCheckbox">
+            <input type="checkbox" id="convertPdfCheckbox" />
+            <span>
+              <strong>Konversi PDF ke format teks Kindle</strong> (subject <code>convert</code>)
+              <span class="sub-note">Centang agar ukuran huruf PDF bisa diubah di Kindle; kosongkan untuk menjaga tata letak asli.</span>
+            </span>
+          </label>
+        </div>
 
-          <button type="button" id="sendKindleBtn" class="btn btn-primary">
-            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-              <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-            <span>Kirim ke Kindle</span>
+        <div class="field">
+          <label class="checkbox-row" for="autoSendFileCheckbox">
+            <input type="checkbox" id="autoSendFileCheckbox" />
+            <span><strong>Mode 1-Klik:</strong> langsung kirim ke Kindle otomatis begitu file dipilih</span>
+          </label>
+        </div>
+      </section>
+
+      <!-- Shared PIN Security Field -->
+      <div class="field shared-pin-field">
+        <div class="field-header">
+          <label for="pinInput">PIN Keamanan</label>
+          <button type="button" id="forgetPinBtn" class="link-btn hidden">Hapus PIN tersimpan</button>
+        </div>
+        <div class="pin-row">
+          <input
+            type="password"
+            id="pinInput"
+            name="pin"
+            inputmode="text"
+            autocomplete="current-password"
+            placeholder="Masukkan APP_PIN"
+            required
+          />
+          <button
+            type="button"
+            id="togglePinBtn"
+            class="icon-btn"
+            aria-label="Tampilkan atau sembunyikan PIN"
+            title="Tampilkan PIN"
+          >
+            Lihat
           </button>
         </div>
-      </form>
+        <p class="hint">Disimpan secara lokal di browser ini (<code>localStorage</code>).</p>
+      </div>
+
+      <!-- Shared Status / Loading Banner -->
+      <div id="statusBanner" class="status-banner hidden" role="status" aria-live="polite">
+        <span id="statusSpinner" class="spinner hidden" aria-hidden="true"></span>
+        <div class="status-body">
+          <p id="statusTitle" class="status-title"></p>
+          <p id="statusDetail" class="status-detail"></p>
+        </div>
+      </div>
+
+      <!-- Action Buttons for Tab 1 (Gemini -> EPUB) -->
+      <div id="actionsMarkdown" class="action-grid">
+        <button type="button" id="downloadBtn" class="btn btn-secondary">
+          <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          <span>Unduh EPUB</span>
+        </button>
+
+        <button type="button" id="sendKindleBtn" class="btn btn-primary">
+          <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          <span>Kirim ke Kindle</span>
+        </button>
+      </div>
+
+      <!-- Action Button for Tab 2 (Direct File -> Kindle) -->
+      <div id="actionsFile" class="action-single hidden">
+        <button type="button" id="sendFileBtn" class="btn btn-primary">
+          <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          <span>Kirim File ke Kindle</span>
+        </button>
+      </div>
     </main>
 
     <footer class="app-footer">
-      <p>Rumus LaTeX dirender 300 DPI transparan • CSS ramah e-ink</p>
+      <p>Rumus LaTeX 300 DPI • Kirim EPUB, PDF, DOCX &amp; gambar langsung ke Kindle</p>
     </footer>
   </div>
 
