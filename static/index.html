@@ -126,13 +126,13 @@
               type="file"
               id="fileInput"
               class="sr-only"
-              accept=".epub,.pdf,.docx,.doc,.txt,.rtf,.html,.htm,.png,.jpg,.jpeg,.gif,.bmp"
+              accept=".epub,.md,.markdown,.txt,.pdf,.docx,.doc,.rtf,.html,.htm,.png,.jpg,.jpeg,.gif,.bmp"
             />
             <svg class="drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
               <path d="M12 16V4m0 0l-4 4m4-4l4 4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
             <p class="drop-title">Ketuk untuk pilih file atau tarik ke sini</p>
-            <p id="fileLimitHint" class="drop-sub">EPUB, PDF, DOCX, DOC, TXT, RTF, HTML, PNG, JPG, GIF, BMP • Maks. 20 MB</p>
+            <p id="fileLimitHint" class="drop-sub">EPUB, MD, TXT (auto render LaTeX), PDF, DOCX, DOC, RTF, HTML, gambar • Maks. 20 MB</p>
           </div>
 
           <div id="filePreview" class="file-preview hidden">
@@ -143,6 +143,16 @@
             </div>
             <button type="button" id="clearFileBtn" class="tool-btn">Hapus</button>
           </div>
+        </div>
+
+        <div id="latexRenderBox" class="field option-card hidden">
+          <label class="checkbox-row" for="renderLatexFileCheckbox">
+            <input type="checkbox" id="renderLatexFileCheckbox" checked />
+            <span>
+              <strong>Deteksi &amp; render rumus LaTeX (300 DPI)</strong> sebelum dikirim
+              <span id="latexRenderNote" class="sub-note">Otomatis merender rumus LaTeX di dalam file .md, .txt, atau .epub.</span>
+            </span>
+          </label>
         </div>
 
         <div id="pdfConvertBox" class="field option-card hidden">

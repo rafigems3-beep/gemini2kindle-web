@@ -956,6 +956,44 @@ def _normalize_markdown_tables(text: str) -> str:
     return "\n".join(out)
 
 
+def extract_latex_from_text_fragment(
+    text: str,
+    register_math,
+    auto_detect_latex: bool = True,
+) -> str:
+    """Extract LaTeX from a plain text fragment (used for XHTML text nodes inside EPUBs)."""
+    working = text.replace("\r\n", "\n").replace("\r", "\n")
+    working = _ILLEGAL_XML_CHARS_RE.sub("", working)
+    working = _NBSP_RE.sub(" ", working)
+    working = _INVISIBLE_ZW_RE.sub("", working)
+
+    def _replace_display(match: re.Match[str]) -> str:
+        inner = match.group(1).strip()
+        if not inner:
+            return match.group(0)
+        return register_math(inner, display=True)
+
+    def _replace_inline_paren(match: re.Match[str]) -> str:
+        inner = match.group(1).strip()
+        if not inner:
+            return match.group(0)
+        return register_math(inner, display=False)
+
+    working = _DISPLAY_BRACKET_RE.sub(_replace_display, working)
+    working = _DISPLAY_DOLLAR_RE.sub(_replace_display, working)
+    working = _INLINE_PAREN_RE.sub(_replace_inline_paren, working)
+    working = _extract_inline_dollar_math(working, register_math)
+
+    if auto_detect_latex:
+        working = _BARE_ENV_RE.sub(lambda m: register_math(m.group(0), display=True), working)
+        working = _extract_bare_brackets(working, register_math)
+        working = _extract_bare_parens(working, register_math)
+        working = _extract_bare_standalone_lines(working, register_math)
+        working = _extract_bare_inline_math(working, register_math)
+
+    return working
+
+
 def extract_latex_expressions(
     markdown_text: str,
     auto_detect_latex: bool = True,
@@ -1268,20 +1306,37 @@ def convert_markdown_to_epub(
     author: str | None = None,
     language: str | None = None,
     auto_detect_latex: bool = True,
+    render_latex: bool = True,
 ) -> ConversionResult:
     """Convert Gemini Markdown + LaTeX into a valid e-ink EPUB 3 archive."""
     clean_title = _ILLEGAL_XML_CHARS_RE.sub("", title).strip() or "Gemini Document"
     clean_author = _ILLEGAL_XML_CHARS_RE.sub("", (author or settings.default_author)).strip() or "Gemini"
     clean_lang = (language or settings.default_language or "id").strip() or "id"
 
-    # 1. Extract LaTeX safely before Markdown parsing
-    protected_md, occurrences, unique_items = extract_latex_expressions(
-        markdown_text,
-        auto_detect_latex=auto_detect_latex,
-    )
-
-    # 2. Batch-render all unique formulas to 300 DPI transparent PNG
-    rendered_by_key, engine_used = render_math_batch(unique_items, settings=settings)
+    # 1. Extract LaTeX safely before Markdown parsing (optional if render_latex=False)
+    if render_latex:
+        protected_md, occurrences, unique_items = extract_latex_expressions(
+            markdown_text,
+            auto_detect_latex=auto_detect_latex,
+        )
+        # 2. Batch-render all unique formulas to 300 DPI transparent PNG
+        rendered_by_key, engine_used = render_math_batch(unique_items, settings=settings)
+    else:
+        normalized = markdown_text.replace("\r\n", "\n").replace("\r", "\n")
+        normalized = _ILLEGAL_XML_CHARS_RE.sub("", normalized)
+        code_store: dict[str, str] = {}
+        working = _protect_fenced_code(normalized, code_store)
+        working = _protect_inline_code(working, code_store)
+        working = _NBSP_RE.sub(" ", working)
+        working = _INVISIBLE_ZW_RE.sub("", working)
+        working = _normalize_markdown_tables(working)
+        for token in reversed(list(code_store.keys())):
+            working = working.replace(token, code_store[token])
+        protected_md = working
+        occurrences = {}
+        unique_items = []
+        rendered_by_key = {}
+        engine_used = "disabled"
 
     href_by_key: dict[str, str] = {}
     images_to_embed: list[tuple[str, str, bytes]] = []

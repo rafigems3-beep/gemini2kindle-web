@@ -6,9 +6,10 @@
   const AUTO_SEND_STORAGE_KEY = 'g2k_auto_send_file';
 
   const ALLOWED_EXTENSIONS = new Set([
-    '.epub', '.pdf', '.docx', '.doc', '.txt', '.rtf',
+    '.epub', '.md', '.markdown', '.txt', '.pdf', '.docx', '.doc', '.rtf',
     '.html', '.htm', '.png', '.jpg', '.jpeg', '.gif', '.bmp',
   ]);
+  const LATEX_RENDER_EXTENSIONS = new Set(['.epub', '.md', '.markdown', '.txt']);
 
   const els = {
     tabMarkdown: document.getElementById('tabMarkdown'),
@@ -41,6 +42,9 @@
     fileNameText: document.getElementById('fileNameText'),
     fileSizeText: document.getElementById('fileSizeText'),
     clearFileBtn: document.getElementById('clearFileBtn'),
+    latexRenderBox: document.getElementById('latexRenderBox'),
+    renderLatexFileCheckbox: document.getElementById('renderLatexFileCheckbox'),
+    latexRenderNote: document.getElementById('latexRenderNote'),
     pdfConvertBox: document.getElementById('pdfConvertBox'),
     convertPdfCheckbox: document.getElementById('convertPdfCheckbox'),
     autoSendFileCheckbox: document.getElementById('autoSendFileCheckbox'),
@@ -438,6 +442,7 @@ def delta_u(q_joule: float, w_joule: float) -> float:
     selectedFile = null;
     els.fileInput.value = '';
     els.filePreview.classList.add('hidden');
+    els.latexRenderBox.classList.add('hidden');
     els.pdfConvertBox.classList.add('hidden');
     els.convertPdfCheckbox.checked = false;
   }
@@ -451,7 +456,7 @@ def delta_u(q_joule: float, w_joule: float) -> float:
       showStatus(
         'error',
         `Format "${ext || 'tidak dikenal'}" tidak didukung Kindle.`,
-        'Gunakan EPUB, PDF, DOCX, DOC, TXT, RTF, HTML, PNG, JPG, GIF, atau BMP.'
+        'Gunakan EPUB, MD, TXT, PDF, DOCX, DOC, RTF, HTML, PNG, JPG, GIF, atau BMP.'
       );
       return;
     }
@@ -478,6 +483,16 @@ def delta_u(q_joule: float, w_joule: float) -> float:
     els.fileNameText.textContent = file.name;
     els.fileSizeText.textContent = formatBytes(file.size);
     els.filePreview.classList.remove('hidden');
+
+    const supportsLatex = LATEX_RENDER_EXTENSIONS.has(ext);
+    els.latexRenderBox.classList.toggle('hidden', !supportsLatex);
+    if (supportsLatex && els.latexRenderNote) {
+      els.latexRenderNote.textContent =
+        ext === '.epub'
+          ? 'Mendeteksi & merender rumus LaTeX mentah di dalam bab EPUB menjadi PNG 300 DPI tanpa merusak bab/cover.'
+          : 'Mengubah file menjadi EPUB 3 ramah e-ink dengan rumus LaTeX dirender 300 DPI.';
+    }
+
     els.pdfConvertBox.classList.toggle('hidden', ext !== '.pdf');
     hideStatus();
 
@@ -497,17 +512,27 @@ def delta_u(q_joule: float, w_joule: float) -> float:
     const pin = requirePin();
     if (!pin) return;
 
+    const ext = getFileExtension(selectedFile.name);
+    const willRenderLatex =
+      LATEX_RENDER_EXTENSIONS.has(ext) &&
+      (!els.renderLatexFileCheckbox || els.renderLatexFileCheckbox.checked);
+
     setBusy(true);
     showStatus(
       'loading',
-      `Mengirim ${selectedFile.name} ke Kindle...`,
-      `Mengunggah file (${formatBytes(selectedFile.size)}) ke server lalu meneruskannya ke Kindle.`
+      willRenderLatex
+        ? `Mendeteksi & merender LaTeX pada ${selectedFile.name}...`
+        : `Mengirim ${selectedFile.name} ke Kindle...`,
+      willRenderLatex
+        ? 'Merender rumus LaTeX ke 300 DPI lalu mengirim hasilnya ke Kindle Anda.'
+        : `Mengunggah file (${formatBytes(selectedFile.size)}) ke server lalu meneruskannya ke Kindle.`
     );
 
     try {
       const formData = new FormData();
       formData.append('file', selectedFile, selectedFile.name);
       formData.append('convert_pdf', els.convertPdfCheckbox.checked ? 'true' : 'false');
+      formData.append('render_latex', willRenderLatex ? 'true' : 'false');
 
       const response = await fetch('/api/send-file', {
         method: 'POST',
@@ -525,11 +550,20 @@ def delta_u(q_joule: float, w_joule: float) -> float:
 
       const data = await response.json();
       const modeLabel = data.mail_mode === 'apps_script' ? 'Apps Script' : 'SMTP';
-      const pdfNote = data.converted_pdf ? ' • Konversi teks PDF aktif' : '';
+      const extras = [];
+      if (data.math_total > 0) {
+        extras.push(`${data.math_total} rumus LaTeX dirender (${data.math_engine})`);
+      } else if (data.rendered_latex && ext !== '.epub') {
+        extras.push('dikonversi ke EPUB 3');
+      }
+      if (data.converted_pdf) {
+        extras.push('Konversi teks PDF aktif');
+      }
+      const extraText = extras.length ? ` • ${extras.join(' • ')}` : '';
       showStatus(
         'success',
         'File berhasil dikirim ke Kindle!',
-        `${data.filename} (${formatBytes(data.size_bytes)})${pdfNote} • Mode ${modeLabel}.`
+        `${data.filename} (${formatBytes(data.size_bytes)})${extraText} • Mode ${modeLabel}.`
       );
     } catch (err) {
       showStatus('error', 'Koneksi terputus', `Tidak dapat menghubungi server: ${err.message}`);
@@ -548,7 +582,7 @@ def delta_u(q_joule: float, w_joule: float) -> float:
         maxUploadMb = info.max_upload_mb;
         if (els.fileLimitHint) {
           els.fileLimitHint.textContent =
-            `EPUB, PDF, DOCX, DOC, TXT, RTF, HTML, PNG, JPG, GIF, BMP • Maks. ${maxUploadMb} MB`;
+            `EPUB, MD, TXT (auto render LaTeX), PDF, DOCX, DOC, RTF, HTML, gambar • Maks. ${maxUploadMb} MB`;
         }
       }
 

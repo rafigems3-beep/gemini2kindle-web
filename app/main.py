@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from app.config import PROJECT_ROOT, Settings, load_settings
 from app.converter import convert_markdown_to_epub
+from app.epub_math_processor import process_epub_latex
 from app.latex_renderer import get_effective_math_engine
 from app.mailer import MailerError, send_epub_to_kindle, send_file_to_kindle
 
@@ -27,13 +28,15 @@ logger = logging.getLogger(__name__)
 
 STATIC_DIR = PROJECT_ROOT / "static"
 
-# Official Amazon Send-to-Kindle email attachment formats
+# Official Amazon Send-to-Kindle email attachment formats + Markdown (.md/.markdown converted to EPUB 3)
 KINDLE_ALLOWED_MIME: dict[str, str] = {
     ".epub": "application/epub+zip",
+    ".md": "text/markdown",
+    ".markdown": "text/markdown",
+    ".txt": "text/plain",
     ".pdf": "application/pdf",
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ".doc": "application/msword",
-    ".txt": "text/plain",
     ".rtf": "application/rtf",
     ".html": "text/html",
     ".htm": "text/html",
@@ -214,13 +217,32 @@ async def send_kindle(
     )
 
 
+def _decode_text_bytes(raw: bytes) -> str:
+    for encoding in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="replace")
+
+
+def _infer_title_from_text(text: str, fallback: str) -> str:
+    match = re.search(r"^\s*#\s+(.+?)\s*$", text, re.MULTILINE)
+    if match:
+        cleaned = re.sub(r"[*_`~]+", "", match.group(1)).strip()
+        if cleaned:
+            return cleaned[:120]
+    return fallback
+
+
 @app.post("/api/send-file")
 async def send_file(
     file: UploadFile = File(...),
     convert_pdf: bool = Form(default=False),
+    render_latex: bool = Form(default=True),
     settings: Settings = Depends(verify_app_pin),
 ) -> JSONResponse:
-    """Upload any Amazon Send-to-Kindle supported file and deliver it directly to Kindle."""
+    """Upload a Kindle-supported file (with optional LaTeX rendering for .md/.txt/.epub) and send to Kindle."""
     raw_name = file.filename or ""
     ext = Path(raw_name).suffix.lower()
 
@@ -228,7 +250,7 @@ async def send_file(
         supported_str = ", ".join(sorted(KINDLE_ALLOWED_MIME.keys()))
         raise HTTPException(
             status_code=400,
-            detail=f"Format file '{ext or '(tanpa ekstensi)'}' tidak didukung Send-to-Kindle. "
+            detail=f"Format file '{ext or '(tanpa ekstensi)'}' tidak didukung. "
             f"Format yang didukung: {supported_str}.",
         )
 
@@ -259,10 +281,68 @@ async def send_file(
     file_bytes = b"".join(chunks)
     safe_filename = _sanitize_upload_filename(raw_name, ext)
     mime_type = KINDLE_ALLOWED_MIME[ext]
+    out_ext = ext
+    converted_pdf = False
+    rendered_latex = False
+    math_total = 0
+    math_engine = "none"
+    subject = Path(safe_filename).stem
 
-    # Amazon Send-to-Kindle converts PDF to reflowable Kindle format when subject is "convert"
-    converted_pdf = ext == ".pdf" and bool(convert_pdf)
-    subject = "convert" if converted_pdf else Path(safe_filename).stem
+    # Optional LaTeX detection & 300 DPI rendering for .md, .txt, and .epub
+    if ext in {".md", ".markdown"} or (ext == ".txt" and render_latex):
+        text_content = _decode_text_bytes(file_bytes)
+        _validate_markdown_size(text_content, settings)
+        doc_title = _infer_title_from_text(text_content, Path(safe_filename).stem)
+        try:
+            conv = await run_in_threadpool(
+                convert_markdown_to_epub,
+                title=doc_title,
+                markdown_text=text_content,
+                settings=settings,
+                auto_detect_latex=True,
+                render_latex=bool(render_latex),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Failed to convert %s file to EPUB", ext)
+            raise HTTPException(status_code=500, detail=f"Gagal memproses file {ext}: {exc}") from exc
+
+        file_bytes = conv.epub_bytes
+        safe_filename = _sanitize_upload_filename(Path(safe_filename).stem, ".epub")
+        mime_type = "application/epub+zip"
+        out_ext = ".epub"
+        subject = doc_title
+        rendered_latex = bool(render_latex)
+        math_total = conv.math_total
+        math_engine = conv.math_engine
+    elif ext == ".epub" and render_latex:
+        try:
+            epub_res = await run_in_threadpool(
+                process_epub_latex,
+                epub_bytes=file_bytes,
+                settings=settings,
+                auto_detect_latex=True,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Failed to process LaTeX inside EPUB")
+            raise HTTPException(status_code=500, detail=f"Gagal merender LaTeX di dalam EPUB: {exc}") from exc
+
+        file_bytes = epub_res.epub_bytes
+        rendered_latex = epub_res.modified
+        math_total = epub_res.math_total
+        math_engine = epub_res.math_engine
+    else:
+        # Amazon Send-to-Kindle converts PDF to reflowable Kindle format when subject is "convert"
+        converted_pdf = ext == ".pdf" and bool(convert_pdf)
+        subject = "convert" if converted_pdf else Path(safe_filename).stem
+
+    if len(file_bytes) > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Ukuran file hasil render ({len(file_bytes) / (1024 * 1024):.1f} MB) melebihi batas "
+            f"{settings.max_upload_mb} MB untuk lampiran email Kindle.",
+        )
 
     try:
         delivery = await run_in_threadpool(
@@ -284,9 +364,12 @@ async def send_file(
         content={
             "status": "sent",
             "filename": safe_filename,
-            "extension": ext,
-            "size_bytes": total_size,
+            "extension": out_ext,
+            "size_bytes": len(file_bytes),
             "converted_pdf": converted_pdf,
+            "rendered_latex": rendered_latex,
+            "math_total": math_total,
+            "math_engine": math_engine,
             "mail_mode": delivery["mode"],
         }
     )
