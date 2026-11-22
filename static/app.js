@@ -167,12 +167,12 @@ def delta_u(q_joule: float, w_joule: float) -> float:
 
     let count = 0;
 
-    // 1. Explicit display math $$...$$ and \[...\]
-    const blocks = rest.match(/\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]/g) || [];
+    // 1. Explicit display math $$...$$, \[...\], and Google-Docs-escaped \$\$...\$\$
+    const blocks = rest.match(/\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]|\\\$\\\$[\s\S]+?\\\$\\\$/g) || [];
     count += blocks.length;
-    rest = rest.replace(/\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]/g, ' ');
+    rest = rest.replace(/\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]|\\\$\\\$[\s\S]+?\\\$\\\$/g, ' ');
 
-    // 2. Explicit inline math \(...\) and $...$
+    // 2. Explicit inline math \(...\), $...$, and Google-Docs-escaped \$...\$
     const inlineParen = rest.match(/\\\([\s\S]+?\\\)/g) || [];
     count += inlineParen.length;
     rest = rest.replace(/\\\([\s\S]+?\\\)/g, ' ');
@@ -180,6 +180,10 @@ def delta_u(q_joule: float, w_joule: float) -> float:
     const inlineDollar = rest.match(/(?<!\\)\$(?!\s|\$)(?:\\\$|[^$\n])+?(?<!\s)\$(?!\d|\$)/g) || [];
     count += inlineDollar.length;
     rest = rest.replace(/(?<!\\)\$(?!\s|\$)(?:\\\$|[^$\n])+?(?<!\s)\$(?!\d|\$)/g, ' ');
+
+    const inlineGdocs = rest.match(/(?<!\\)\\\$(?!\s|\\\$)(?:\\\\\\\$|[^|\n])+?(?<!\s)(?<!\\)\\\$(?!\d)/g) || [];
+    count += inlineGdocs.length;
+    rest = rest.replace(/(?<!\\)\\\$(?!\s|\\\$)(?:\\\\\\\$|[^|\n])+?(?<!\s)(?<!\\)\\\$(?!\d)/g, ' ');
 
     // 3. Auto-detected bare LaTeX
     const autoDetect = !els.autoDetectCheckbox || els.autoDetectCheckbox.checked;

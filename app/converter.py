@@ -30,6 +30,9 @@ _ILLEGAL_XML_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _DISPLAY_BRACKET_RE = re.compile(r"(?<!\\)\\\[([\s\S]+?)\\\]")
 _DISPLAY_DOLLAR_RE = re.compile(r"(?<!\\)\$\$([\s\S]+?)\$\$")
 _INLINE_PAREN_RE = re.compile(r"(?<!\\)\\\(((?:(?!\n\n)[\s\S])+?)\\\)")
+_GDOCS_DISPLAY_RE = re.compile(r"(?<!\\)\\\$\\\$([\s\S]+?)\\\$\\\$")
+_GDOCS_UNESCAPE_RE = re.compile(r"\\([\\$_+=<>\[\]()\-*.!#~`^])")
+_GDOCS_MATH_SIGNAL_RE = re.compile(r"\\\\|\\[_=+<>\-]|[\^{}]")
 _MATH_TOKEN_RE = re.compile(r"(G2KMATH(?:BLK|INL)\d+TOKEN)")
 
 _BARE_ENV_NAMES = (
@@ -145,6 +148,28 @@ def _count_preceding_backslashes(text: str, pos: int) -> int:
     return count
 
 
+_CODE_HINT_RE = re.compile(
+    r"(?m)^\s*(?:def |class |import |from \w+ import |function |const |let |var |echo |return |#include|SELECT |CREATE TABLE|#!/)"
+)
+
+
+def _is_stray_prose_fence(info_str: str, inner_lines: list[str]) -> bool:
+    """Detect accidental bare ``` fences wrapping prose + LaTeX (common in Gemini/Google Docs exports)."""
+    if info_str.strip():
+        return False
+    inner = "\n".join(inner_lines).strip()
+    if not inner or _CODE_HINT_RE.search(inner):
+        return False
+    has_explicit_math = bool(
+        re.search(r"\\\([\s\S]+?\\\)|\\\[[\s\S]+?\\\]|\$\$[\s\S]+?\$\$|\\\$\\\$[\s\S]+?\\\$\\\$", inner)
+    )
+    if not has_explicit_math:
+        return False
+    # Prose wrapped by mistake typically has Markdown formatting or multi-word sentences
+    word_count = len(re.findall(r"\b[A-Za-z]{3,}\b", inner))
+    return word_count >= 6 or "**" in inner or "[cite:" in inner
+
+
 def _protect_fenced_code(markdown_text: str, code_store: dict[str, str]) -> str:
     """Replace CommonMark fenced code blocks (``` or ~~~) with safe alphanumeric tokens."""
     lines = markdown_text.split("\n")
@@ -168,13 +193,20 @@ def _protect_fenced_code(markdown_text: str, code_store: dict[str, str]) -> str:
 
             block_lines = [line]
             i += 1
+            closed = False
             close_pattern = re.compile(rf"^[ ]{{0,3}}{re.escape(fence_char)}{{{fence_len},}}[ \t]*$")
             while i < n:
                 block_lines.append(lines[i])
                 if close_pattern.match(lines[i]):
+                    closed = True
                     i += 1
                     break
                 i += 1
+
+            # Unwrap accidental bare ``` wrapping prose + LaTeX (e.g. Google Docs export artifact)
+            if closed and fence_char == "`" and _is_stray_prose_fence(info_str, block_lines[1:-1]):
+                out_lines.extend(block_lines[1:-1])
+                continue
 
             token = f"G2KCODE{len(code_store)}TOKEN"
             code_store[token] = "\n".join(block_lines)
@@ -956,6 +988,81 @@ def _normalize_markdown_tables(text: str) -> str:
     return "\n".join(out)
 
 
+def _unescape_gdocs_latex(raw: str) -> str:
+    """Restore LaTeX commands escaped by Google Docs Markdown export (e.g. \\\\text -> \\text, \\_ -> _)."""
+    return _GDOCS_UNESCAPE_RE.sub(r"\1", raw).strip()
+
+
+def _extract_gdocs_escaped_math(text: str, register_math) -> str:
+    """Extract Google-Docs-escaped LaTeX delimiters ``\\$\\$...\\$\\$`` and ``\\$...\\$``.
+
+    Handles inner escaped currency like ``\\$\\\\\\$17{,}97\\\\text{M}\\$`` -> ``\\$17{,}97\\text{M}``
+    while leaving standalone currency like ``(\\$23.2-35.2/t)`` or ``(2013\\$)`` untouched.
+    """
+
+    def _replace_gdocs_display(match: re.Match[str]) -> str:
+        inner = _unescape_gdocs_latex(match.group(1))
+        if not inner:
+            return match.group(0)
+        return register_math(inner, display=True)
+
+    text = _GDOCS_DISPLAY_RE.sub(_replace_gdocs_display, text)
+
+    out: list[str] = []
+    i = 0
+    n = len(text)
+
+    while i < n:
+        if (
+            text[i] == "\\"
+            and i + 1 < n
+            and text[i + 1] == "$"
+            and _count_preceding_backslashes(text, i) == 0
+        ):
+            # Must not start with whitespace or another \$
+            if i + 2 >= n or text[i + 2].isspace() or text[i + 2 : i + 4] == r"\$":
+                out.append(r"\$")
+                i += 2
+                continue
+
+            j = i + 2
+            matched = False
+            while j < n:
+                ch = text[j]
+                if ch == "|" or (ch == "\n" and j + 1 < n and text[j + 1] == "\n"):
+                    break
+                if ch == "\\" and j + 1 < n:
+                    if text[j + 1] == "$" and _count_preceding_backslashes(text, j) == 0:
+                        prev_ch = text[j - 1]
+                        next_ch = text[j + 2] if j + 2 < n else ""
+                        raw_inner = text[i + 2 : j]
+                        if (
+                            raw_inner
+                            and not prev_ch.isspace()
+                            and not next_ch.isdigit()
+                            and _GDOCS_MATH_SIGNAL_RE.search(raw_inner)
+                        ):
+                            unescaped = _unescape_gdocs_latex(raw_inner)
+                            if unescaped:
+                                out.append(register_math(unescaped, display=False))
+                                i = j + 2
+                                matched = True
+                                break
+                        break
+                    j += 2
+                    continue
+                j += 1
+
+            if not matched:
+                out.append(r"\$")
+                i += 2
+        else:
+            out.append(text[i])
+            i += 1
+
+    return "".join(out)
+
+
 def extract_latex_from_text_fragment(
     text: str,
     register_math,
@@ -983,6 +1090,7 @@ def extract_latex_from_text_fragment(
     working = _DISPLAY_DOLLAR_RE.sub(_replace_display, working)
     working = _INLINE_PAREN_RE.sub(_replace_inline_paren, working)
     working = _extract_inline_dollar_math(working, register_math)
+    working = _extract_gdocs_escaped_math(working, register_math)
 
     if auto_detect_latex:
         working = _BARE_ENV_RE.sub(lambda m: register_math(m.group(0), display=True), working)
@@ -1060,7 +1168,10 @@ def extract_latex_expressions(
     working = _INLINE_PAREN_RE.sub(_replace_inline_paren, working)
     working = _extract_inline_dollar_math(working, register_math)
 
-    # 3) Auto-detect delimiter-less (bare) LaTeX often produced when copying from Gemini
+    # 3) Google Docs Markdown-exported escaped LaTeX (\$\$...\$\$ and \$...\$)
+    working = _extract_gdocs_escaped_math(working, register_math)
+
+    # 4) Auto-detect delimiter-less (bare) LaTeX often produced when copying from Gemini
     if auto_detect_latex:
         working = _BARE_ENV_RE.sub(lambda m: register_math(m.group(0), display=True), working)
         working = _extract_bare_brackets(working, register_math)
@@ -1068,10 +1179,10 @@ def extract_latex_expressions(
         working = _extract_bare_standalone_lines(working, register_math)
         working = _extract_bare_inline_math(working, register_math)
 
-    # 4) Normalize Markdown tables (fixes Gemini NBSP, blank lines between rows, Unicode dashes, etc.)
+    # 5) Normalize Markdown tables (fixes Gemini NBSP, blank lines between rows, Unicode dashes, etc.)
     working = _normalize_markdown_tables(working)
 
-    # 5) Restore protected code blocks & inline code (reverse order handles nested restores safely)
+    # 6) Restore protected code blocks & inline code (reverse order handles nested restores safely)
     for token in reversed(list(code_store.keys())):
         working = working.replace(token, code_store[token])
 
