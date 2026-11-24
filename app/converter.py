@@ -1063,6 +1063,19 @@ def _extract_gdocs_escaped_math(text: str, register_math) -> str:
     return "".join(out)
 
 
+_DISPLAY_BRACKET_MATH_SIGNAL_RE = re.compile(r"\\[A-Za-z]+|[=+^_<>{}≈≤≥≠→⇒×÷±∞∑∫]")
+
+
+def _is_real_display_bracket_math(raw_inner: str) -> bool:
+    """Distinguish true LaTeX ``\\[...\\]`` display math from Markdown-escaped bracket tags like ``\\[F\\]``."""
+    stripped = raw_inner.strip()
+    if not stripped:
+        return False
+    if "\n" in stripped:
+        return True
+    return bool(_DISPLAY_BRACKET_MATH_SIGNAL_RE.search(stripped))
+
+
 def extract_latex_from_text_fragment(
     text: str,
     register_math,
@@ -1074,7 +1087,13 @@ def extract_latex_from_text_fragment(
     working = _NBSP_RE.sub(" ", working)
     working = _INVISIBLE_ZW_RE.sub("", working)
 
-    def _replace_display(match: re.Match[str]) -> str:
+    def _replace_display_bracket(match: re.Match[str]) -> str:
+        raw_inner = match.group(1)
+        if not _is_real_display_bracket_math(raw_inner):
+            return match.group(0)
+        return register_math(raw_inner.strip(), display=True)
+
+    def _replace_display_dollar(match: re.Match[str]) -> str:
         inner = match.group(1).strip()
         if not inner:
             return match.group(0)
@@ -1086,8 +1105,8 @@ def extract_latex_from_text_fragment(
             return match.group(0)
         return register_math(inner, display=False)
 
-    working = _DISPLAY_BRACKET_RE.sub(_replace_display, working)
-    working = _DISPLAY_DOLLAR_RE.sub(_replace_display, working)
+    working = _DISPLAY_BRACKET_RE.sub(_replace_display_bracket, working)
+    working = _DISPLAY_DOLLAR_RE.sub(_replace_display_dollar, working)
     working = _INLINE_PAREN_RE.sub(_replace_inline_paren, working)
     working = _extract_inline_dollar_math(working, register_math)
     working = _extract_gdocs_escaped_math(working, register_math)
@@ -1148,7 +1167,13 @@ def extract_latex_expressions(
         )
         return token
 
-    def _replace_display(match: re.Match[str]) -> str:
+    def _replace_display_bracket(match: re.Match[str]) -> str:
+        raw_inner = match.group(1)
+        if not _is_real_display_bracket_math(raw_inner):
+            return match.group(0)
+        return register_math(raw_inner.strip(), display=True)
+
+    def _replace_display_dollar(match: re.Match[str]) -> str:
         inner = match.group(1).strip()
         if not inner:
             return match.group(0)
@@ -1161,8 +1186,8 @@ def extract_latex_expressions(
         return register_math(inner, display=False)
 
     # 1) Explicit display math first so $$...$$ and \[...\] are never split by inline rules
-    working = _DISPLAY_BRACKET_RE.sub(_replace_display, working)
-    working = _DISPLAY_DOLLAR_RE.sub(_replace_display, working)
+    working = _DISPLAY_BRACKET_RE.sub(_replace_display_bracket, working)
+    working = _DISPLAY_DOLLAR_RE.sub(_replace_display_dollar, working)
 
     # 2) Explicit inline math \(...\) and $...$
     working = _INLINE_PAREN_RE.sub(_replace_inline_paren, working)
